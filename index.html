@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon District Riders - Engine Prototype</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0b0c10;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 30px rgba(0, 242, 254, 0.3);
+            border: 2px solid #00f2fe;
+            border-radius: 8px;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            border-radius: 6px;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+        }
+        .hud-card {
+            background: rgba(11, 12, 16, 0.75);
+            border-left: 4px solid #4facfe;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-radius: 0 6px 6px 0;
+            backdrop-filter: blur(4px);
+        }
+        .hud-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #00f2fe;
+            margin-bottom: 2px;
+        }
+        .hud-value {
+            font-size: 22px;
+            font-weight: bold;
+            font-family: monospace;
+            color: #ffffff;
+        }
+        #checkpoint-modal {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid #ff007f;
+            box-shadow: 0 0 20px rgba(255, 0, 127, 0.5);
+            padding: 15px 30px;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+            animation: pulse 1.5s infinite alternate;
+        }
+        @keyframes pulse {
+            from { box-shadow: 0 0 15px rgba(255, 0, 127, 0.4); }
+            to { box-shadow: 0 0 25px rgba(255, 0, 127, 0.8); }
+        }
+        .btn-action {
+            background: linear-gradient(45deg, #ff007f, #7928ca);
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-radius: 4px;
+            cursor: pointer;
+            pointer-events: auto;
+            margin-top: 8px;
+            letter-spacing: 1px;
+        }
+        .btn-action:hover {
+            filter: brightness(1.2);
+        }
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.6);
+            background: rgba(0,0,0,0.5);
+            padding: 8px 12px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1 style="margin: 0 0 15px 0; font-size: 28px; letter-spacing: 3px; background: linear-gradient(to right, #00f2fe, #4facfe); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">NEON DISTRICT RIDERS</h1>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="900" height="550"></canvas>
+        
+        <!-- HUD Elements -->
+        <div id="ui-overlay">
+            <div class="hud-card">
+                <div class="hud-title">Current Sector</div>
+                <div id="hud-zone" class="hud-value" style="color: #ff007f;">Starter Lanes</div>
+            </div>
+            <div class="hud-card">
+                <div class="hud-title">Velocity</div>
+                <div id="hud-speed" class="hud-value">0 KM/H</div>
+            </div>
+        </div>
+
+        <!-- Popups for System Interactions -->
+        <div id="checkpoint-modal">
+            <div style="font-weight: bold; color: #ff007f; letter-spacing: 1px;">CITY BORDER GATE SECURED</div>
+            <div style="font-size: 13px; color: #aaa; margin-top: 3px;">Manual Authorization Required to Access Open Freeway</div>
+            <button class="btn-action" onclick="unlockFreewayGate()">Authorize Access [E]</button>
+        </div>
+
+        <div id="controls-hint">
+            Drive: Arrow Keys / WASD | Action: E
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI Document Nodes
+        const speedHud = document.getElementById('hud-speed');
+        const zoneHud = document.getElementById('hud-zone');
+        const modal = document.getElementById('checkpoint-modal');
+
+        // Game Core States
+        let isFreewayUnlocked = false;
+        let gateProgress = 0; // Animation tracking open position
+        let cameraX = 0;
+        let cameraY = 0;
+
+        // Player Vehicle State Config
+        const vehicle = {
+            x: 180,
+            y: 275,
+            vx: 0,
+            vy: 0,
+            speed: 0,
+            topSpeed: 7.5,
+            angle: 0,
+            accel: 0.12,
+            decel: 0.05,
+            handling: 0.045,
+            width: 32,
+            height: 18
+        };
+
+        // Key Input Tracking Dictionary
+        const keys = {
+            KeyW: false, ArrowUp: false,
+            KeyS: false, ArrowDown: false,
+            KeyA: false, ArrowLeft: false,
+            KeyD: false, ArrowRight: false,
+            KeyE: false
+        };
+
+        // Static World Coordinates Maps
+        const world = {
+            width: 2800,
+            height: 600,
+            checkpointX: 520,
+            gateY: 150,
+            gateHeight: 250
+        };
+
+        // Event Registration Architecture
+        window.addEventListener('keydown', (e) => { 
+            if(e.code in keys) keys[e.code] = true;
+            if(e.code === 'KeyE') handleActionKey();
+        });
+        window.addEventListener('keyup', (e) => { 
+            if(e.code in keys) keys[e.code] = false; 
+        });
+
+        function handleActionKey() {
+            if (vehicle.x > world.checkpointX - 90 && vehicle.x < world.checkpointX && !isFreewayUnlocked) {
+                unlockFreewayGate();
+            }
+        }
+
+        function unlockFreewayGate() {
+            isFreewayUnlocked = true;
+            modal.style.display = 'none';
+        }
+
+        // Core Physics Frame Loop
+        function updatePhysics() {
+            // Forward/Reverse inputs
+            if (keys.KeyW || keys.ArrowUp) {
+                vehicle.speed = Math.min(vehicle.speed + vehicle.accel, vehicle.topSpeed);
+            } else if (keys.KeyS || keys.ArrowDown) {
+                vehicle.speed = Math.max(vehicle.speed - vehicle.accel, -vehicle.topSpeed * 0.4);
+            } else {
+                // Natural scrubbing/rolling friction slowing vehicle down
+                if (vehicle.speed > 0) vehicle.speed = Math.max(vehicle.speed - vehicle.decel, 0);
+                if (vehicle.speed < 0) vehicle.speed = Math.min(vehicle.speed + vehicle.decel, 0);
+            }
+
+            // Steering dynamics tied directly to motion vector strength
+            if (Math.abs(vehicle.speed) > 0.2) {
+                const turnDirection = vehicle.speed > 0 ? 1 : -1;
+                if (keys.KeyA || keys.ArrowLeft) vehicle.angle -= vehicle.handling * turnDirection;
+                if (keys.KeyD || keys.ArrowRight) vehicle.angle += vehicle.handling * turnDirection;
+            }
+
+            // Convert velocity vectors out from trigonometry tracking angular heading
+            vehicle.vx = Math.cos(vehicle.angle) * vehicle.speed;
+            vehicle.vy = Math.sin(vehicle.angle) * vehicle.speed;
+
+            // Apply calculated updates to positional coordinate markers
+            vehicle.x += vehicle.vx;
+            vehicle.y += vehicle.vy;
+
+            // System Collision Layer Management: The Checkpoint Boundary Wall
+            if (!isFreewayUnlocked) {
+                // Keep player bounded on left side before confirmation trigger pipeline fires
+                if (vehicle.x + vehicle.width/2 > world.checkpointX - 10) {
+                    vehicle.x = world.checkpointX - 10 - vehicle.width/2;
+                    vehicle.speed = 0;
+                }
+                
+                // Show manual interaction overlay button alert box
+                if (vehicle.x > world.checkpointX - 110) {
+                    modal.style.display = 'block';
+                } else {
+                    modal.style.display = 'none';
+                }
+            } else {
+                modal.style.display = 'none';
+                if (gateProgress < 1) gateProgress = Math.min(gateProgress + 0.02, 1);
+            }
+
+            // Outer Boundary Arena Restraints
+            if (vehicle.y < 80) { vehicle.y = 80; vehicle.speed *= 0.5; }
+            if (vehicle.y > world.height - 80) { vehicle.y = world.height - 80; vehicle.speed *= 0.5; }
+            if (vehicle.x < 50) { vehicle.x = 50; vehicle.speed = 0; }
+            if (vehicle.x > world.width - 50) { vehicle.x = world.width - 50; vehicle.speed = 0; }
+
+            // Dynamic Smooth Tracking Camera Transformations
+            cameraX = vehicle.x - canvas.width / 2;
+            cameraY = vehicle.y - canvas.height / 2;
+
+            // Clamp Camera views to World space sizes
+            cameraX = Math.max(0, Math.min(cameraX, world.width - canvas.width));
+            cameraY = Math.max(0, Math.min(cameraY, world.height - canvas.height));
+
+            // Push state variables safely out to HTML text views
+            speedHud.innerText = `${Math.round(Math.abs(vehicle.speed) * 32)} KM/H`;
